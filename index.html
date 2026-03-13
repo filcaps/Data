@@ -59,8 +59,8 @@
 
     .col-btn.active { color: #34d399 !important; background: rgba(15,107,74,.2) !important; }
 
-    #modal, #settings-modal { display: none; }
-    #modal.open, #settings-modal.open { display: flex; }
+    #modal { display: none; }
+    #modal.open { display: flex; }
 
     [contenteditable]:focus { outline: none; }
 
@@ -111,12 +111,6 @@
       </div>
 
       <div class="w-px h-4 bg-white/10"></div>
-
-      <button onclick="openSettings()"
-              class="flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-lg border border-[#0f6b4a]/25 text-slate-400 hover:text-slate-200 hover:border-[#0f6b4a]/50 transition-all">
-        <div id="key-dot" class="key-dot bg-red-500/70"></div>
-        <span id="key-label">API key</span>
-      </button>
 
       <button id="present-btn" onclick="togglePresent()"
               class="text-xs px-3 py-1.5 rounded-lg border border-[#0f6b4a]/30 text-emerald-400 hover:bg-[#0f6b4a]/15 transition-all flex items-center gap-1.5">
@@ -282,33 +276,6 @@
 </div>
 
 <!-- ══════════════════════════════════════
-     SETTINGS MODAL
-══════════════════════════════════════ -->
-<div id="settings-modal" class="fixed inset-0 z-50 items-center justify-center bg-black/75 backdrop-blur-sm p-4">
-  <div class="grad-border rounded-2xl w-full max-w-sm shadow-2xl scale-in" style="background:#050e0a">
-    <div class="p-6">
-      <div class="flex items-start justify-between mb-5">
-        <div>
-          <div class="text-white font-semibold text-sm">Settings</div>
-          <div class="text-slate-500 text-xs mt-0.5">Anthropic API key for chart extraction</div>
-        </div>
-        <button onclick="closeSettings()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-500 hover:text-white hover:bg-white/10 transition-colors text-xl">×</button>
-      </div>
-      <label class="text-slate-500 text-[11px] mb-1.5 block">API Key</label>
-      <input id="api-key-input" type="password" placeholder="sk-ant-..."
-             class="w-full rounded-lg border border-[#0f6b4a]/25 text-slate-300 text-xs px-3 py-2.5 mb-1.5 mono" />
-      <div class="text-slate-700 text-[10px] mb-5">Stored in localStorage — only sent to api.anthropic.com</div>
-      <div class="flex gap-2">
-        <button onclick="closeSettings()"
-                class="flex-1 py-2.5 rounded-lg border border-white/8 text-slate-400 text-xs hover:text-slate-200 transition-all">Cancel</button>
-        <button onclick="saveSettings()"
-                class="flex-[2] py-2.5 rounded-lg btn-primary text-emerald-300 text-xs font-semibold">Save</button>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- ══════════════════════════════════════
      SCRIPT
 ══════════════════════════════════════ -->
 <script>
@@ -360,8 +327,7 @@ function boot() {
   document.getElementById('dash-subtitle').textContent = S.subtitle;
   setLayout(S.layout, true);
   render();
-  updateKeyDot();
-  document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeModal(); closeSettings(); } });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
 }
 
 function bind(id, cb) {
@@ -371,9 +337,7 @@ function bind(id, cb) {
 }
 
 // ─── Persist ──────────────────────────────────────────────────────────────────
-function save()       { try { localStorage.setItem(STORE_KEY, JSON.stringify(S)); } catch {} }
-function getKey()     { return localStorage.getItem('q_apikey') || ''; }
-function setKey(k)    { localStorage.setItem('q_apikey', k); }
+function save() { try { localStorage.setItem(STORE_KEY, JSON.stringify(S)); } catch {} }
 
 // ─── Layout ───────────────────────────────────────────────────────────────────
 function setLayout(n, silent) {
@@ -633,13 +597,10 @@ async function analyzeAndAdd() {
   const src = pendingSrc || document.getElementById('url-input').value.trim();
   if (!src) { shakeEl('drop-zone'); return; }
 
-  const apiKey = getKey();
-  if (!apiKey) { closeModal(); openSettings(); return; }
-
   showLoading('Extracting chart data…');
 
   try {
-    const cd = await extractChart(src, apiKey);
+    const cd = await extractChart(src);
 
     const titleOv = document.getElementById('title-input').value.trim();
     const noteOv  = document.getElementById('note-input').value.trim();
@@ -656,64 +617,17 @@ async function analyzeAndAdd() {
   }
 }
 
-async function extractChart(src, apiKey) {
-  const PROMPT = `You are a precise chart digitizer. Analyze this chart image and return ONLY a raw JSON object — no markdown, no explanation.
-
-{
-  "type": "line" | "bar" | "scatter" | "area",
-  "title": "chart title",
-  "subtitle": "subtitle or note if present",
-  "xAxis": { "label": "x axis label/unit" },
-  "yAxis": { "label": "y axis label/unit" },
-  "datasets": [
-    {
-      "label": "series name from legend",
-      "style": "solid" | "dashed" | "dotted",
-      "data": [{"x": <number or string>, "y": <number>}]
-    }
-  ]
-}
-
-Rules:
-- LINE/CDF charts → type "line", x must be numbers, extract 20+ evenly-spaced points per series
-- BAR charts → type "bar", x must be the category label string
-- SCATTER → type "scatter", extract every visible point
-- AREA (filled) → type "area", x must be numbers
-- Read axis scales carefully for accurate values
-- Include ALL series from the legend with correct labels and line styles
-- Return ONLY the JSON`;
-
-  const imageBlock = src.startsWith('data:')
-    ? (() => { const [m,d] = src.split(','); return { type:'image', source:{ type:'base64', media_type: m.match(/:(.*?);/)?.[1] || 'image/png', data: d } }; })()
-    : { type:'image', source:{ type:'url', url: src } };
-
-  const res = await fetch('https://api.anthropic.com/v1/messages', {
+async function extractChart(src) {
+  const res = await fetch('/api/extract', {
     method: 'POST',
-    headers: {
-      'x-api-key':                             apiKey,
-      'anthropic-version':                     '2023-06-01',
-      'content-type':                          'application/json',
-      'anthropic-dangerous-direct-browser-access': 'true',
-    },
-    body: JSON.stringify({
-      model:      'claude-opus-4-5',
-      max_tokens: 4096,
-      messages:   [{ role: 'user', content: [imageBlock, { type:'text', text: PROMPT }] }],
-    }),
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ src }),
   });
 
-  if (!res.ok) {
-    const e = await res.json().catch(() => ({}));
-    throw new Error(e?.error?.message || `API ${res.status}`);
-  }
-
-  const body = await res.json();
-  const raw  = (body.content?.[0]?.text || '').replace(/^```[a-z]*\n?/i,'').replace(/```$/,'').trim();
-
-  let parsed;
-  try { parsed = JSON.parse(raw); } catch { throw new Error('Could not parse response. Try again.'); }
-  if (!parsed.datasets?.length) throw new Error('No datasets found in chart.');
-  return parsed;
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `Server error ${res.status}`);
+  if (!data.datasets?.length) throw new Error('No datasets found in chart.');
+  return data;
 }
 
 // ─── Modal helpers ────────────────────────────────────────────────────────────
@@ -764,16 +678,6 @@ function resetDrop() {
   document.getElementById('drop-preview').classList.add('hidden');
   document.getElementById('drop-prompt').style.display = '';
   document.getElementById('drop-zone').classList.remove('has-img','drag-over');
-}
-
-// ─── Settings ─────────────────────────────────────────────────────────────────
-function openSettings()  { document.getElementById('api-key-input').value = getKey(); document.getElementById('settings-modal').classList.add('open'); setTimeout(() => document.getElementById('api-key-input').focus(), 80); }
-function closeSettings() { document.getElementById('settings-modal').classList.remove('open'); }
-function saveSettings()  { setKey(document.getElementById('api-key-input').value.trim()); updateKeyDot(); closeSettings(); }
-function updateKeyDot()  {
-  const ok = !!getKey();
-  document.getElementById('key-dot').className   = `key-dot ${ok ? 'bg-emerald-500/80' : 'bg-red-500/60'}`;
-  document.getElementById('key-label').textContent = ok ? 'API key set' : 'No API key';
 }
 
 // ─── Present mode ─────────────────────────────────────────────────────────────
