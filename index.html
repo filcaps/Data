@@ -164,7 +164,7 @@
     <div class="text-center">
       <div class="text-slate-400 font-medium text-sm">No charts yet</div>
       <div class="text-slate-600 text-xs mt-1.5 max-w-xs leading-relaxed">
-        Drop a chart screenshot — Claude reads the data and redraws it in Quote's style
+        Drop a chart screenshot — local AI reads the data and redraws it in Quote's style (no API key)
       </div>
     </div>
     <button onclick="openModal()"
@@ -186,7 +186,7 @@
       <div class="flex items-start justify-between mb-5">
         <div>
           <div class="text-white font-semibold text-sm">Add Chart</div>
-          <div class="text-slate-500 text-xs mt-0.5">Claude extracts the data and redraws it in Quote style</div>
+          <div class="text-slate-500 text-xs mt-0.5">AI reads the data locally and redraws it in Quote style — no API key needed</div>
         </div>
         <button onclick="closeModal()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-500 hover:text-white hover:bg-white/10 transition-colors text-xl leading-none">×</button>
       </div>
@@ -617,17 +617,92 @@ async function analyzeAndAdd() {
   }
 }
 
-async function extractChart(src) {
-  const res = await fetch('/api/extract', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ src }),
-  });
+// ─── Vision Model — runs entirely in browser, no API key ──────────────────────
+let _tf = null, _proc = null, _vlm = null;
 
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.error || `Server error ${res.status}`);
-  if (!data.datasets?.length) throw new Error('No datasets found in chart.');
-  return data;
+async function getTF() {
+  if (_tf) return _tf;
+  _tf = await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.3.3');
+  return _tf;
+}
+
+async function ensureModel(onMsg) {
+  if (_vlm) return;
+  const { AutoProcessor, AutoModelForVision2Seq } = await getTF();
+  const MODEL = 'HuggingFaceTB/SmolVLM-500M-Instruct';
+  const mkCb = (phase) => ({ status, file, loaded, total }) => {
+    if (status === 'downloading' && total) {
+      const pct = Math.round(100 * loaded / total);
+      const name = (file || '').split('/').pop() || 'file';
+      onMsg(`${phase}: ${name} … ${pct}%`);
+    } else if (status === 'done') {
+      onMsg(`${phase}: ready`);
+    }
+  };
+  onMsg('Loading AI model (first use: ~300 MB download, then cached)…');
+  _proc = await AutoProcessor.from_pretrained(MODEL, { progress_callback: mkCb('Processor') });
+  _vlm  = await AutoModelForVision2Seq.from_pretrained(MODEL, {
+    dtype: 'q4',
+    device: (navigator.gpu) ? 'webgpu' : 'wasm',
+    progress_callback: mkCb('Model'),
+  });
+}
+
+async function extractChart(src) {
+  await ensureModel(msg => showLoading(msg));
+  showLoading('Analyzing chart…');
+
+  const { RawImage } = await getTF();
+  let image;
+  try {
+    if (src.startsWith('data:')) {
+      const blob = await (await fetch(src)).blob();
+      image = await RawImage.fromBlob(blob);
+    } else {
+      image = await RawImage.fromURL(src);
+    }
+  } catch {
+    throw new Error('Could not load image. Please upload a file directly.');
+  }
+
+  const PROMPT = `Analyze this chart image and return ONLY a raw JSON object — no markdown, no explanation.
+
+{
+  "type": "line" | "bar" | "scatter" | "area",
+  "title": "chart title from the image",
+  "subtitle": "subtitle or source note if visible, else empty string",
+  "xAxis": { "label": "x axis label / units" },
+  "yAxis": { "label": "y axis label / units" },
+  "datasets": [
+    {
+      "label": "series name from legend",
+      "style": "solid" | "dashed" | "dotted",
+      "data": [{"x": <number or string>, "y": <number>}]
+    }
+  ]
+}
+
+Rules:
+- LINE / AREA charts → type "line" or "area", x must be numbers, extract 15+ evenly-spaced points per series
+- BAR charts → type "bar", x must be the category label string
+- SCATTER → type "scatter", extract every visible data point
+- Read axis scales very carefully to get accurate y values
+- Include ALL series visible in the legend with correct labels
+- Return ONLY the JSON object, nothing else`;
+
+  const messages = [{ role: 'user', content: [{ type: 'image' }, { type: 'text', text: PROMPT }] }];
+  const text   = _proc.apply_chat_template(messages, { tokenize: false, add_generation_prompt: true });
+  const inputs = await _proc(text, [image], { padding: true, truncation: true });
+
+  const output  = await _vlm.generate({ ...inputs, max_new_tokens: 2048, do_sample: false });
+  const trimmed = output.map((ids, i) => ids.slice(inputs.input_ids[i].length));
+  const raw     = (_proc.batch_decode(trimmed, { skip_special_tokens: true })[0] || '').trim()
+                    .replace(/^```[a-z]*\n?/i, '').replace(/```$/, '').trim();
+
+  let parsed;
+  try { parsed = JSON.parse(raw); } catch { throw new Error('Could not parse chart data from AI response. Try again.'); }
+  if (!parsed.datasets?.length) throw new Error('No datasets found in chart.');
+  return parsed;
 }
 
 // ─── Modal helpers ────────────────────────────────────────────────────────────
