@@ -59,6 +59,10 @@
 
     .col-btn.active { color: #34d399 !important; background: rgba(15,107,74,.2) !important; }
 
+    .ct-btn { color:#475569; border:1px solid rgba(255,255,255,.07); background:transparent; cursor:pointer; transition:all .15s; }
+    .ct-btn:hover { color:#94a3b8; border-color:rgba(255,255,255,.12); }
+    .ct-btn.active { color:#34d399 !important; background:rgba(15,107,74,.2) !important; border-color:rgba(52,211,153,.3) !important; }
+
     #modal { display: none; }
     #modal.open { display: flex; }
 
@@ -164,7 +168,7 @@
     <div class="text-center">
       <div class="text-slate-400 font-medium text-sm">No charts yet</div>
       <div class="text-slate-600 text-xs mt-1.5 max-w-xs leading-relaxed">
-        Drop a chart screenshot — local AI reads the data and redraws it in Quote's style (no API key)
+        Paste CSV/TSV data from Excel or Sheets — renders instantly in Quote's style
       </div>
     </div>
     <button onclick="openModal()"
@@ -183,53 +187,80 @@
 <div id="modal" class="fixed inset-0 z-50 items-center justify-center bg-black/75 backdrop-blur-sm p-4">
   <div class="grad-border rounded-2xl w-full max-w-md shadow-2xl scale-in" style="background:#050e0a">
     <div class="p-6">
-      <div class="flex items-start justify-between mb-5">
+
+      <div class="flex items-start justify-between mb-4">
         <div>
           <div class="text-white font-semibold text-sm">Add Chart</div>
-          <div class="text-slate-500 text-xs mt-0.5">Local AI (WebGPU) reads the chart and redraws it in Quote style — no API key</div>
+          <div class="text-slate-500 text-xs mt-0.5">Paste CSV/TSV data — renders instantly in Quote style</div>
         </div>
         <button onclick="closeModal()" class="w-7 h-7 rounded-lg flex items-center justify-center text-slate-500 hover:text-white hover:bg-white/10 transition-colors text-xl leading-none">×</button>
       </div>
 
+      <!-- Optional reference image -->
       <div id="drop-zone"
-           class="drop-zone rounded-xl p-6 flex flex-col items-center justify-center gap-3 cursor-pointer mb-4 min-h-[120px]"
+           class="drop-zone rounded-xl p-3 flex items-center justify-center gap-3 cursor-pointer mb-4 min-h-[56px]"
            onclick="document.getElementById('file-input').click()"
            ondrop="handleDrop(event)" ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)">
         <input type="file" id="file-input" accept="image/*" class="hidden" onchange="handleFile(event)">
         <div id="drop-preview" class="hidden w-full">
-          <img id="preview-img" class="w-full max-h-44 object-contain rounded-lg" />
-          <div class="text-center mt-2 text-[11px] text-emerald-400 opacity-70">Image loaded — click to replace</div>
+          <img id="preview-img" class="w-full max-h-28 object-contain rounded" />
+          <div class="text-center mt-1 text-[10px] text-emerald-400/60">Reference image · click to replace</div>
         </div>
-        <div id="drop-prompt" class="text-center pointer-events-none">
-          <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="1.5" opacity="0.4" class="mx-auto mb-2">
+        <div id="drop-prompt" class="flex items-center gap-2 pointer-events-none">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#34d399" stroke-width="1.5" opacity="0.35">
             <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
             <polyline points="17,8 12,3 7,8"/><line x1="12" y1="3" x2="12" y2="15"/>
           </svg>
-          <div class="text-slate-400 text-xs">Drop chart image or <span class="text-emerald-400">click to browse</span></div>
-          <div class="text-slate-700 text-[10px] mt-1">PNG · JPG · WebP · SVG</div>
+          <span class="text-slate-600 text-[11px]">Drop chart image as <span class="text-slate-500">reference</span> <span class="text-slate-700">(optional)</span></span>
         </div>
       </div>
 
-      <div class="relative flex items-center mb-4">
-        <div class="flex-1 border-t border-white/5"></div>
-        <span class="px-3 text-slate-600 text-[10px] uppercase tracking-widest">or image URL</span>
-        <div class="flex-1 border-t border-white/5"></div>
+      <!-- Chart type -->
+      <div class="flex gap-1.5 mb-4">
+        <button id="ct-line"    onclick="setChartType('line')"    class="ct-btn flex-1 py-1.5 rounded-lg text-[11px] font-medium">Line</button>
+        <button id="ct-bar"     onclick="setChartType('bar')"     class="ct-btn flex-1 py-1.5 rounded-lg text-[11px] font-medium">Bar</button>
+        <button id="ct-area"    onclick="setChartType('area')"    class="ct-btn flex-1 py-1.5 rounded-lg text-[11px] font-medium">Area</button>
+        <button id="ct-scatter" onclick="setChartType('scatter')" class="ct-btn flex-1 py-1.5 rounded-lg text-[11px] font-medium">Scatter</button>
       </div>
-      <input id="url-input" type="text" placeholder="https://..."
-             class="w-full rounded-lg border border-[#0f6b4a]/25 text-slate-300 text-xs px-3 py-2.5 mb-4"
-             oninput="handleUrlInput(event)" onpaste="handleUrlPaste(event)" />
 
-      <div class="grid grid-cols-2 gap-2 mb-5">
+      <!-- Title / Note -->
+      <div class="grid grid-cols-2 gap-2 mb-3">
         <div>
-          <label class="text-slate-500 text-[11px] mb-1.5 block">Title <span class="text-slate-700">(optional override)</span></label>
-          <input id="title-input" type="text" placeholder="Auto-detected"
-                 class="w-full rounded-lg border border-[#0f6b4a]/25 text-slate-300 text-xs px-3 py-2.5" />
+          <label class="text-slate-500 text-[11px] mb-1 block">Title</label>
+          <input id="title-input" type="text" placeholder="Chart title"
+                 class="w-full rounded-lg border border-[#0f6b4a]/25 text-slate-300 text-xs px-3 py-2" />
         </div>
         <div>
-          <label class="text-slate-500 text-[11px] mb-1.5 block">Note <span class="text-slate-700">(optional)</span></label>
+          <label class="text-slate-500 text-[11px] mb-1 block">Note</label>
           <input id="note-input" type="text" placeholder="Source, context…"
-                 class="w-full rounded-lg border border-[#0f6b4a]/25 text-slate-300 text-xs px-3 py-2.5" />
+                 class="w-full rounded-lg border border-[#0f6b4a]/25 text-slate-300 text-xs px-3 py-2" />
         </div>
+      </div>
+
+      <!-- Axis labels -->
+      <div class="grid grid-cols-2 gap-2 mb-3">
+        <div>
+          <label class="text-slate-500 text-[11px] mb-1 block">X axis label</label>
+          <input id="xlabel-input" type="text" placeholder="e.g. Date"
+                 class="w-full rounded-lg border border-[#0f6b4a]/25 text-slate-300 text-xs px-3 py-2" />
+        </div>
+        <div>
+          <label class="text-slate-500 text-[11px] mb-1 block">Y axis label</label>
+          <input id="ylabel-input" type="text" placeholder="e.g. Price (USD)"
+                 class="w-full rounded-lg border border-[#0f6b4a]/25 text-slate-300 text-xs px-3 py-2" />
+        </div>
+      </div>
+
+      <!-- Data -->
+      <div class="mb-5">
+        <div class="flex items-center justify-between mb-1.5">
+          <label class="text-slate-500 text-[11px]">Data <span class="text-slate-700">— paste CSV or TSV from Excel / Sheets</span></label>
+          <span id="data-badge" class="hidden text-[10px] text-emerald-400 mono"></span>
+        </div>
+        <textarea id="data-input" rows="5" oninput="parseDataInput()"
+                  placeholder="Date,BTC,ETH&#10;Jan 2024,42000,2500&#10;Feb 2024,45000,2800&#10;Mar 2024,62000,3400"
+                  class="w-full rounded-lg border border-[#0f6b4a]/25 text-slate-300 text-[11px] px-3 py-2.5 mono resize-none"></textarea>
+        <div class="text-[10px] text-slate-700 mt-1">First column = X axis. Each extra column = one series. Tab or comma separated.</div>
       </div>
 
       <!-- Actions -->
@@ -237,40 +268,26 @@
         <div class="flex gap-2">
           <button onclick="closeModal()"
                   class="flex-1 py-2.5 rounded-lg border border-white/8 text-slate-400 text-xs hover:text-slate-200 hover:border-white/15 transition-all">Cancel</button>
-          <button onclick="analyzeAndAdd()"
+          <button onclick="addChartFromData()"
                   class="flex-[2] py-2.5 rounded-lg btn-primary text-emerald-300 text-xs font-semibold flex items-center justify-center gap-2">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
             </svg>
-            Analyze &amp; Add
+            Add Chart
           </button>
-        </div>
-      </div>
-
-      <!-- Loading -->
-      <div id="modal-loading" class="hidden">
-        <div class="flex flex-col items-center gap-3 py-4">
-          <svg class="spinner" width="22" height="22" viewBox="0 0 24 24" fill="none">
-            <circle cx="12" cy="12" r="10" stroke="rgba(15,107,74,.2)" stroke-width="2.5"/>
-            <path d="M12 2a10 10 0 0 1 10 10" stroke="#34d399" stroke-width="2.5" stroke-linecap="round"/>
-          </svg>
-          <div id="loading-msg" class="text-slate-400 text-xs">Extracting chart data…</div>
         </div>
       </div>
 
       <!-- Error -->
       <div id="modal-error" class="hidden">
         <div class="rounded-lg border border-red-500/20 bg-red-500/5 px-4 py-3 mb-3">
-          <div class="text-red-400 text-xs font-medium mb-0.5">Extraction failed</div>
+          <div class="text-red-400 text-xs font-medium mb-0.5">Could not add chart</div>
           <div id="error-msg" class="text-red-400/70 text-[11px]"></div>
         </div>
-        <div class="flex gap-2">
-          <button onclick="showModalActions()"
-                  class="flex-1 py-2.5 rounded-lg border border-white/8 text-slate-400 text-xs hover:text-slate-200 transition-all">Back</button>
-          <button onclick="analyzeAndAdd()"
-                  class="flex-[2] py-2.5 rounded-lg btn-primary text-emerald-300 text-xs font-semibold">Retry</button>
-        </div>
+        <button onclick="showModalActions()"
+                class="w-full py-2.5 rounded-lg border border-white/8 text-slate-400 text-xs hover:text-slate-200 transition-all">Back</button>
       </div>
+
     </div>
   </div>
 </div>
@@ -592,145 +609,99 @@ function movePanel(id, dir) {
   save(); render();
 }
 
-// ─── Analyze & Add ────────────────────────────────────────────────────────────
-async function analyzeAndAdd() {
-  const src = pendingSrc || document.getElementById('url-input').value.trim();
-  if (!src) { shakeEl('drop-zone'); return; }
+// ─── Chart type selector ──────────────────────────────────────────────────────
+let selectedChartType = 'line';
 
-  showLoading('Extracting chart data…');
+function setChartType(type) {
+  selectedChartType = type;
+  document.querySelectorAll('.ct-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.id === 'ct-' + type);
+  });
+}
 
-  try {
-    const cd = await extractChart(src);
+// ─── CSV / TSV parser ─────────────────────────────────────────────────────────
+function parseCSV(text) {
+  const lines = text.trim().split(/\r?\n/).filter(l => l.trim());
+  if (lines.length < 2) return null;
+  const sep  = lines[0].includes('\t') ? '\t' : ',';
+  const rows = lines.map(l => l.split(sep).map(c => c.trim().replace(/^"|"$/g, '')));
+  const hdrs = rows[0];
+  if (hdrs.length < 2) return null;
+  const xHeader = hdrs[0];
+  const series  = hdrs.slice(1);
+  const datasets = series.map(name => ({ label: name, style: 'solid', data: [] }));
+  for (let r = 1; r < rows.length; r++) {
+    const row = rows[r];
+    if (!row[0]?.trim()) continue;
+    const xNum = parseFloat(row[0].replace(/,/g, ''));
+    const x    = isNaN(xNum) ? row[0] : xNum;
+    series.forEach((_, i) => {
+      const y = parseFloat((row[i + 1] || '').replace(/,/g, ''));
+      if (!isNaN(y)) datasets[i].data.push({ x, y });
+    });
+  }
+  const valid = datasets.filter(ds => ds.data.length > 0);
+  return valid.length ? { datasets: valid, xHeader } : null;
+}
 
-    const titleOv = document.getElementById('title-input').value.trim();
-    const noteOv  = document.getElementById('note-input').value.trim();
-    if (titleOv) cd.title    = titleOv;
-    if (noteOv)  cd.subtitle = noteOv;
-
-    const date = new Date().toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
-    S.panels.push({ id: S.nextId++, title: cd.title || '', note: cd.subtitle || '', date, status: 'ready', chartData: cd });
-    save();
-    closeModal();
-    render();
-  } catch (err) {
-    showError(err.message || 'Unknown error');
+function parseDataInput() {
+  const parsed = parseCSV(document.getElementById('data-input').value);
+  const badge  = document.getElementById('data-badge');
+  if (parsed) {
+    badge.textContent = `${parsed.datasets.length} series · ${parsed.datasets[0].data.length} pts`;
+    badge.classList.remove('hidden');
+  } else {
+    badge.classList.add('hidden');
   }
 }
 
-// ─── Vision Model — runs entirely in browser, no API key ──────────────────────
-// Requires WebGPU (Chrome/Edge on modern hardware). Falls back to a helpful
-// error rather than silently running on CPU WASM (which would take minutes).
-let _tf = null, _proc = null, _vlm = null;
+// ─── Add chart from pasted data ───────────────────────────────────────────────
+function addChartFromData() {
+  const dataText = document.getElementById('data-input').value.trim();
+  const title    = document.getElementById('title-input').value.trim();
+  const note     = document.getElementById('note-input').value.trim();
+  const xLabel   = document.getElementById('xlabel-input').value.trim();
+  const yLabel   = document.getElementById('ylabel-input').value.trim();
 
-async function getTF() {
-  if (_tf) return _tf;
-  _tf = await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.3.3');
-  return _tf;
-}
+  if (!dataText) { shakeEl('data-input'); return; }
 
-async function ensureModel(onMsg) {
-  if (_vlm) return;
-
-  // WebGPU check — WASM inference for a VLM takes many minutes, not seconds
-  if (!navigator.gpu) {
-    throw new Error(
-      'WebGPU is required for local AI extraction. ' +
-      'Please open this tool in Chrome or Edge on a desktop computer.'
-    );
+  const parsed = parseCSV(dataText);
+  if (!parsed) {
+    showError('Could not read data. Check format: first row = headers, first column = X values, comma or tab separated.');
+    return;
   }
 
-  const { AutoProcessor, AutoModelForVision2Seq } = await getTF();
-  const MODEL = 'HuggingFaceTB/SmolVLM-256M-Instruct'; // 256 M — ~150 MB download
-  const mkCb = (phase) => ({ status, file, loaded, total }) => {
-    if (status === 'downloading' && total) {
-      const pct  = Math.round(100 * loaded / total);
-      const name = (file || '').split('/').pop() || 'file';
-      onMsg(`${phase}: ${name} … ${pct}%`);
-    }
+  const cd = {
+    type:     selectedChartType,
+    title:    title || (parsed.datasets.length === 1 ? parsed.datasets[0].label : 'Chart'),
+    subtitle: note,
+    xAxis:    { label: xLabel || parsed.xHeader },
+    yAxis:    { label: yLabel },
+    datasets: parsed.datasets,
   };
 
-  onMsg('Loading AI model (first use: ~150 MB, then cached)…');
-  _proc = await AutoProcessor.from_pretrained(MODEL, { progress_callback: mkCb('Processor') });
-  try {
-    _vlm = await AutoModelForVision2Seq.from_pretrained(MODEL, {
-      dtype: 'q4',
-      device: 'webgpu',
-      progress_callback: mkCb('Model'),
-    });
-  } catch (gpuErr) {
-    _vlm = null;
-    throw new Error('WebGPU failed to initialise — try restarting Chrome, or use a different browser. (' + gpuErr.message + ')');
-  }
-}
-
-// Race a promise against a timeout
-function withTimeout(promise, ms, msg) {
-  return Promise.race([
-    promise,
-    new Promise((_, reject) => setTimeout(() => reject(new Error(msg)), ms)),
-  ]);
-}
-
-async function extractChart(src) {
-  await ensureModel(msg => showLoading(msg));
-  showLoading('Analyzing chart…');
-
-  const { RawImage } = await getTF();
-  let image;
-  try {
-    image = src.startsWith('data:')
-      ? await RawImage.fromBlob(await (await fetch(src)).blob())
-      : await RawImage.fromURL(src);
-  } catch {
-    throw new Error('Could not load image. Please upload a file directly.');
-  }
-
-  // Compact prompt — fewer output tokens = faster inference
-  const PROMPT =
-`Return ONLY a JSON object (no markdown) describing this chart:
-{"type":"line"|"bar"|"scatter"|"area","title":"...","subtitle":"...","xAxis":{"label":"..."},"yAxis":{"label":"..."},"datasets":[{"label":"...","style":"solid"|"dashed"|"dotted","data":[{"x":0,"y":0}]}]}
-Rules: LINE→x numbers, ~10 pts/series. BAR→x is category string. SCATTER→every point. Read axis scales carefully. Include all legend series.`;
-
-  const messages = [{ role: 'user', content: [{ type: 'image' }, { type: 'text', text: PROMPT }] }];
-  const text   = _proc.apply_chat_template(messages, { tokenize: false, add_generation_prompt: true });
-  const inputs = await _proc(text, [image], { padding: true, truncation: true });
-
-  const output = await withTimeout(
-    _vlm.generate({ ...inputs, max_new_tokens: 500, do_sample: false }),
-    90_000,
-    'Analysis timed out after 90 s. Try a simpler or smaller image.'
-  );
-
-  // output.data is the flat TypedArray; strip prompt tokens, decode only new ones
-  const inputLen = inputs.input_ids.dims[1];
-  const newIds   = Array.from(output.data.slice(inputLen)).map(Number);
-  let   raw      = (_proc.decode(newIds, { skip_special_tokens: true }) || '').trim()
-                     .replace(/^```[a-z]*\n?/i, '').replace(/```$/, '').trim();
-
-  // Extract the outermost {...} in case the model emits extra commentary
-  const jsonStart = raw.indexOf('{');
-  const jsonEnd   = raw.lastIndexOf('}');
-  if (jsonStart !== -1 && jsonEnd > jsonStart) raw = raw.slice(jsonStart, jsonEnd + 1);
-
-  let parsed;
-  try { parsed = JSON.parse(raw); } catch { throw new Error('Could not parse chart data from AI response. Try again or use a cleaner chart image.'); }
-  if (!parsed.datasets?.length) throw new Error('No datasets found in chart.');
-  return parsed;
+  const date = new Date().toLocaleDateString('en-US', { month:'short', day:'numeric', year:'numeric' });
+  S.panels.push({ id: S.nextId++, title: cd.title, note: cd.subtitle || '', date, status: 'ready', chartData: cd });
+  save();
+  closeModal();
+  render();
 }
 
 // ─── Modal helpers ────────────────────────────────────────────────────────────
 function openModal() {
   pendingSrc = null;
-  ['url-input','title-input','note-input'].forEach(id => { document.getElementById(id).value = ''; });
+  ['title-input','note-input','xlabel-input','ylabel-input','data-input']
+    .forEach(id => { const el = document.getElementById(id); if (el) el.value = ''; });
+  document.getElementById('data-badge')?.classList.add('hidden');
   resetDrop();
+  setChartType('line');
   showModalActions();
   document.getElementById('modal').classList.add('open');
-  setTimeout(() => document.getElementById('url-input').focus(), 80);
+  setTimeout(() => document.getElementById('data-input')?.focus(), 80);
 }
-function closeModal()      { document.getElementById('modal').classList.remove('open'); pendingSrc = null; showModalActions(); }
-function showModalActions(){ document.getElementById('modal-actions').classList.remove('hidden'); document.getElementById('modal-loading').classList.add('hidden'); document.getElementById('modal-error').classList.add('hidden'); }
-function showLoading(m)    { document.getElementById('loading-msg').textContent = m; document.getElementById('modal-actions').classList.add('hidden'); document.getElementById('modal-loading').classList.remove('hidden'); document.getElementById('modal-error').classList.add('hidden'); }
-function showError(m)      { document.getElementById('error-msg').textContent = m; document.getElementById('modal-actions').classList.add('hidden'); document.getElementById('modal-loading').classList.add('hidden'); document.getElementById('modal-error').classList.remove('hidden'); }
+function closeModal()       { document.getElementById('modal').classList.remove('open'); pendingSrc = null; showModalActions(); }
+function showModalActions() { document.getElementById('modal-actions').classList.remove('hidden'); document.getElementById('modal-error').classList.add('hidden'); }
+function showError(m)       { document.getElementById('error-msg').textContent = m; document.getElementById('modal-actions').classList.add('hidden'); document.getElementById('modal-error').classList.remove('hidden'); }
 
 // ─── Drop / file ──────────────────────────────────────────────────────────────
 function handleDragOver(e)  { e.preventDefault(); document.getElementById('drop-zone').classList.add('drag-over'); }
@@ -749,8 +720,6 @@ function readFile(f) {
   r.onload = ev => setPreview(ev.target.result, f.name);
   r.readAsDataURL(f);
 }
-function handleUrlInput(e)  { const v = e.target.value.trim(); if (v.startsWith('http')||v.startsWith('data:')) setPreview(v, null); }
-function handleUrlPaste(e)  { setTimeout(() => { const v = document.getElementById('url-input').value.trim(); if (v.startsWith('http')||v.startsWith('data:')) setPreview(v, null); }, 0); }
 function setPreview(src, name) {
   pendingSrc = src;
   document.getElementById('preview-img').src = src;
