@@ -694,10 +694,12 @@ Rules:
   const text   = _proc.apply_chat_template(messages, { tokenize: false, add_generation_prompt: true });
   const inputs = await _proc(text, [image], { padding: true, truncation: true });
 
-  const output  = await _vlm.generate({ ...inputs, max_new_tokens: 2048, do_sample: false });
-  const trimmed = output.map((ids, i) => ids.slice(inputs.input_ids[i].length));
-  const raw     = (_proc.batch_decode(trimmed, { skip_special_tokens: true })[0] || '').trim()
-                    .replace(/^```[a-z]*\n?/i, '').replace(/```$/, '').trim();
+  const output   = await _vlm.generate({ ...inputs, max_new_tokens: 2048, do_sample: false });
+  // output.data is the underlying TypedArray (BigInt64Array); slice off the input prompt tokens
+  const inputLen = inputs.input_ids.dims[1];
+  const newIds   = Array.from(output.data.slice(inputLen)).map(Number);
+  const raw      = (_proc.decode(newIds, { skip_special_tokens: true }) || '').trim()
+                     .replace(/^```[a-z]*\n?/i, '').replace(/```$/, '').trim();
 
   let parsed;
   try { parsed = JSON.parse(raw); } catch { throw new Error('Could not parse chart data from AI response. Try again.'); }
